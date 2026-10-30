@@ -1,0 +1,67 @@
+# Production trên 1 VPS: api + postgres + caddy. Frontend host trên Cloudflare Pages.
+# Dùng: cp infra/.env.prod.example infra/.env.prod && docker compose -f infra/docker-compose.yml --env-file infra/.env.prod up -d
+services:
+  api:
+    image: ghcr.io/${GH_OWNER}/lengkeng-api:${API_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://lengkeng:${POSTGRES_PASSWORD}@postgres:5432/lengkeng?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+      CUSTOMER_URL: ${CUSTOMER_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose: ['3000']
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lengkeng
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: lengkeng
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U lengkeng']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ['80:80', '443:443']
+    environment:
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api]
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      R2_BUCKET: ${R2_BUCKET}
+      R2_ENDPOINT: ${R2_ENDPOINT}
+      AWS_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - backups:/backups
+    entrypoint: ['sh', '-c', 'apk add --no-cache aws-cli >/dev/null && while true; do sh /backup.sh; sleep 86400; done']
+    depends_on: [postgres]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  backups:
