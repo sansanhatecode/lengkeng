@@ -1,0 +1,62 @@
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Không triển khai trong 11–13h và 18–21h giờ Việt Nam (04–06h và 11–14h UTC).
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs: { go: ${{ steps.g.outputs.go }} }
+    steps:
+      - id: g
+        run: |
+          H=$(TZ=Asia/Ho_Chi_Minh date +%H)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo go=true >> $GITHUB_OUTPUT; exit 0; fi
+          if { [ $H -ge 11 ] && [ $H -lt 13 ]; } || { [ $H -ge 18 ] && [ $H -lt 21 ]; }; then
+            echo "Giờ cao điểm của quán, không deploy. Chạy lại bằng workflow_dispatch nếu khẩn."; echo go=false >> $GITHUB_OUTPUT
+          else echo go=true >> $GITHUB_OUTPUT; fi
+
+  api:
+    needs: guard
+    if: needs.guard.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}' }
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/lengkeng-api:latest,ghcr.io/${{ github.repository_owner }}/lengkeng-api:${{ github.sha }}
+      # Dokploy: gọi webhook để kéo image mới. Hoặc thay bằng ssh + docker compose pull/up.
+      - run: curl -fsS -X POST "$DOKPLOY_WEBHOOK" || echo "Chưa cấu hình DOKPLOY_WEBHOOK"
+        env: { DOKPLOY_WEBHOOK: '${{ secrets.DOKPLOY_WEBHOOK }}' }
+
+  web:
+    needs: guard
+    if: needs.guard.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [customer, console]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @lengkeng/shared build
+      - run: pnpm --filter @lengkeng/${{ matrix.app }} build
+        env:
+          VITE_API_URL: ${{ vars.API_URL }}
+          VITE_SOCKET_URL: ${{ vars.SOCKET_URL }}
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/${{ matrix.app }}/dist --project-name=lengkeng-${{ matrix.app }}
