@@ -1,0 +1,13 @@
+@import 'tailwindcss';
+:root { font-size: 16px; }
+@layer components {
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 font-semibold min-h-11 text-base transition disabled:opacity-50 active:scale-[0.98]; }
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 font-semibold min-h-11 text-base transition disabled:opacity-50 active:scale-[0.98] bg-blue-700 text-white hover:bg-blue-800; }
+  .btn-ghost { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 font-semibold min-h-11 text-base transition disabled:opacity-50 active:scale-[0.98] bg-white border border-slate-300 text-slate-800 hover:bg-slate-50; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 font-semibold min-h-11 text-base transition disabled:opacity-50 active:scale-[0.98] bg-red-600 text-white; }
+  .btn-success { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 font-semibold min-h-11 text-base transition disabled:opacity-50 active:scale-[0.98] bg-green-600 text-white; }
+  .card { @apply bg-white rounded-xl border border-slate-200 shadow-sm; }
+  .input { @apply w-full min-h-11 rounded-lg border border-slate-300 px-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500; }
+  .label { @apply block text-sm font-medium text-slate-600 mb-1; }
+}
+@media print { .no-print { display: none !important; } }
