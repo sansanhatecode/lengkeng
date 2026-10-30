@@ -1,0 +1,380 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Enum phải khớp packages/shared/src/enums.ts
+enum StaffRole {
+  OWNER
+  MANAGER
+  WAITER
+  KITCHEN
+  CASHIER
+}
+enum Station {
+  KITCHEN
+  BAR
+}
+enum TableStatus {
+  FREE
+  OCCUPIED
+  LOCKED
+}
+enum SessionStatus {
+  OPEN
+  CLOSED
+}
+enum OrderSource {
+  CUSTOMER
+  STAFF
+}
+enum OrderStatus {
+  PENDING_CONFIRM
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+enum KitchenStatus {
+  QUEUED
+  COOKING
+  DONE
+  SERVED
+}
+enum BillStatus {
+  OPEN
+  PAID
+  VOID
+}
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  VIETQR
+}
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+}
+enum ServiceRequestType {
+  CALL_WAITER
+  REQUEST_BILL
+}
+enum Plan {
+  FREE
+  BASIC
+  PRO
+  CHAIN
+}
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+model Store {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  address   String?
+  settings  Json     @default("{}")
+  /// Quản trị hệ thống khóa quán (hết hạn, vi phạm): nhân viên không đăng nhập được, khách quét QR bị chặn
+  isActive        Boolean  @default(true)
+  suspendedReason String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscription    Subscription?
+  areas           Area[]
+  tables          Table[]
+  sessions        TableSession[]
+  categories      Category[]
+  menuItems       MenuItem[]
+  modifierGroups  ModifierGroup[]
+  orders          Order[]
+  orderItems      OrderItem[]
+  bills           Bill[]
+  payments        Payment[]
+  serviceRequests ServiceRequest[]
+  staff           Staff[]
+  devices         Device[]
+  auditLogs       AuditLog[]
+}
+
+model Subscription {
+  id        String             @id @default(cuid())
+  storeId   String             @unique
+  store     Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  plan      Plan               @default(FREE)
+  status    SubscriptionStatus @default(TRIAL)
+  startsAt  DateTime           @default(now())
+  endsAt    DateTime?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+}
+
+model Area {
+  id        String  @id @default(cuid())
+  storeId   String
+  store     Store   @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name      String
+  sortOrder Int     @default(0)
+  tables    Table[]
+
+  @@index([storeId])
+}
+
+model Table {
+  id       String      @id @default(cuid())
+  storeId  String
+  store    Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  areaId   String
+  area     Area        @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  name     String
+  qrToken  String      @unique
+  status   TableStatus @default(FREE)
+  sessions TableSession[]
+
+  @@unique([storeId, areaId, name])
+  @@index([storeId])
+}
+
+model TableSession {
+  id         String        @id @default(cuid())
+  storeId    String
+  store      Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  tableId    String
+  table      Table         @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  status     SessionStatus @default(OPEN)
+  guestCount Int?
+  cart       Json          @default("{\"lines\":[]}")
+  openedAt   DateTime      @default(now())
+  closedAt   DateTime?
+  lastActivityAt DateTime  @default(now())
+
+  orders          Order[]
+  bill            Bill?
+  serviceRequests ServiceRequest[]
+
+  @@index([storeId, status])
+  @@index([tableId, status])
+}
+
+model Category {
+  id            String     @id @default(cuid())
+  storeId       String
+  store         Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  nameVi        String
+  nameEn        String?
+  sortOrder     Int        @default(0)
+  availableFrom String?
+  availableTo   String?
+  items         MenuItem[]
+
+  @@index([storeId])
+}
+
+model MenuItem {
+  id          String   @id @default(cuid())
+  storeId     String
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  nameVi      String
+  nameEn      String?
+  descVi      String?
+  descEn      String?
+  price       Int
+  imageUrl    String?
+  station     Station  @default(KITCHEN)
+  tags        String[] @default([])
+  isAvailable Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  deletedAt   DateTime?
+
+  modifierGroups ModifierGroup[]
+  orderItems     OrderItem[]
+
+  @@index([storeId, categoryId])
+}
+
+model ModifierGroup {
+  id         String     @id @default(cuid())
+  storeId    String
+  store      Store      @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  menuItemId String
+  menuItem   MenuItem   @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  name       String
+  required   Boolean    @default(false)
+  minSelect  Int        @default(0)
+  maxSelect  Int        @default(1)
+  sortOrder  Int        @default(0)
+  modifiers  Modifier[]
+
+  @@index([menuItemId])
+}
+
+model Modifier {
+  id          String        @id @default(cuid())
+  groupId     String
+  group       ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name        String
+  priceDelta  Int           @default(0)
+  isAvailable Boolean       @default(true)
+  sortOrder   Int           @default(0)
+}
+
+model Order {
+  id             String       @id @default(cuid())
+  storeId        String
+  store          Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  sessionId      String
+  session        TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  dailyNumber    Int
+  source         OrderSource
+  status         OrderStatus  @default(ACCEPTED)
+  idempotencyKey String
+  note           String?
+  rejectReason   String?
+  createdById    String?
+  approvedById   String?
+  approvedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  items          OrderItem[]
+
+  @@unique([storeId, idempotencyKey])
+  @@index([storeId, status, createdAt])
+  @@index([sessionId])
+}
+
+model OrderItem {
+  id                String        @id @default(cuid())
+  storeId           String
+  store             Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orderId           String
+  order             Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId        String
+  menuItem          MenuItem      @relation(fields: [menuItemId], references: [id])
+  nameSnapshot      String
+  qty               Int
+  unitPrice         Int
+  modifiersSnapshot Json          @default("[]")
+  note              String?
+  station           Station
+  kitchenStatus     KitchenStatus @default(QUEUED)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([storeId, station, kitchenStatus])
+  @@index([orderId])
+}
+
+model Bill {
+  id        String       @id @default(cuid())
+  storeId   String
+  store     Store        @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  sessionId String       @unique
+  session   TableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  subtotal  Int          @default(0)
+  discount  Int          @default(0)
+  surcharge Int          @default(0)
+  vat       Int          @default(0)
+  total     Int          @default(0)
+  status    BillStatus   @default(OPEN)
+  closedById String?
+  paidAt    DateTime?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  payments  Payment[]
+
+  @@index([storeId, status, paidAt])
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  storeId         String
+  store           Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  billId          String
+  bill            Bill          @relation(fields: [billId], references: [id], onDelete: Cascade)
+  method          PaymentMethod
+  amount          Int
+  txnRef          String?
+  transferContent String?
+  status          PaymentStatus @default(PAID)
+  webhookPayload  Json?
+  createdAt       DateTime      @default(now())
+
+  @@index([billId])
+}
+
+model ServiceRequest {
+  id          String             @id @default(cuid())
+  storeId     String
+  store       Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  sessionId   String
+  session     TableSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type        ServiceRequestType
+  handledById String?
+  handledAt   DateTime?
+  createdAt   DateTime           @default(now())
+
+  @@index([storeId, handledAt])
+}
+
+model Staff {
+  id           String    @id @default(cuid())
+  storeId      String
+  store        Store     @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name         String
+  role         StaffRole
+  email        String?   @unique
+  passwordHash String?
+  pinHash      String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([storeId])
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  storeId    String
+  store      Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name       String
+  createdById String?
+  lastSeenAt DateTime @default(now())
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([storeId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  storeId   String
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([storeId, createdAt])
+}
+
+/// Người vận hành nền tảng (A1): không thuộc cửa hàng nào, quản lý tất cả cửa hàng.
+model PlatformAdmin {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
